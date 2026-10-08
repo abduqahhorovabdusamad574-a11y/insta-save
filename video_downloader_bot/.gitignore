@@ -1,0 +1,15 @@
+# Maxfiy ma'lumollar va vaqtinchalik fayllar
+.env
+downloads/*
+!downloads/.gitkeep
+utils/cookies.txt
+.music_cache.json
+bot.log
+analytics.db
+analytics.db-*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

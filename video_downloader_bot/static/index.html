@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot Dashboard · Video Downloader</title>
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬇</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<!-- ========== Kirish (parol bo'lsa) ========== -->
+<div class="login" id="loginView" hidden>
+  <form class="login-card" id="loginForm" autocomplete="off">
+    <div class="login-mark" aria-hidden="true">⬇</div>
+    <h1>Dashboard kirishi</h1>
+    <p class="muted">Bot statistikasi faqat egasi uchun. Parolni kiriting.</p>
+    <input type="password" id="passwordInput" placeholder="Parol" autocomplete="current-password" required>
+    <button type="submit" class="btn-primary" id="loginBtn">Kirish</button>
+    <p class="login-error" id="loginError" hidden>Parol noto'g'ri — qayta urinib ko'ring.</p>
+  </form>
+</div>
+
+<!-- ========== Asosiy dashboard ========== -->
+<div class="app" id="appView" hidden>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">⬇</span>
+      <div class="brand-text">
+        <div class="brand-title">Video Downloader <span>Dashboard</span></div>
+        <div class="brand-sub">
+          <span class="mono" id="botHandle">@bot</span>
+          <span class="sep">·</span>
+          <span class="status" id="botStatus"><i class="dot"></i> kuzatilmoqda</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="seg" id="rangeSeg" role="tablist" aria-label="Davr">
+        <button type="button" data-days="7" class="on">7 kun</button>
+        <button type="button" data-days="14">14 kun</button>
+        <button type="button" data-days="30">30 kun</button>
+      </div>
+      <button type="button" class="icon-btn" id="refreshBtn" title="Qayta yangilash" aria-label="Qayta yangilash">⟳</button>
+      <a class="icon-btn" id="exportBtn" href="/api/export.csv" title="CSV yuklab olish" aria-label="CSV yuklab olish">⤓</a>
+      <span class="stamp" id="stamp">—</span>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <!-- KPI kartalar -->
+    <section class="kpis" id="kpis" aria-label="Asosiy ko'rsatkichlar"></section>
+
+    <!-- Grafiklar -->
+    <section class="grid">
+      <article class="card c2">
+        <div class="card-head">
+          <h2>Kunlik faoliyat</h2>
+          <span class="chip" id="tsChip">7 kun</span>
+        </div>
+        <div class="chart tall"><canvas id="activityChart"></canvas></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head"><h2>Amallar taqsimoti</h2></div>
+        <div class="chart donut"><canvas id="actionsChart"></canvas></div>
+        <ul class="legend" id="actionsLegend"></ul>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Jonli hodisalar</h2>
+          <span class="live-tag"><i></i> jonli</span>
+        </div>
+        <ul class="feed" id="feed">
+          <li class="feed-empty">Hozircha hodisalar yo'q — kimdir botga yozsa shu yerda ko'rinadi.</li>
+        </ul>
+      </article>
+
+      <article class="card c2">
+        <div class="card-head">
+          <h2>Soatlik faollik</h2>
+          <span class="chip">oxirgi 24 soat</span>
+        </div>
+        <div class="chart"><canvas id="hourlyChart"></canvas></div>
+      </article>
+    </section>
+
+    <!-- Foydalanuvchilar jadvali -->
+    <section class="card table-card">
+      <div class="card-head">
+        <h2>Foydalanuvchilar <span class="count" id="usersCount"></span></h2>
+        <div class="tools">
+          <input id="searchInput" class="search" type="search" placeholder="Qidiruv: @username, ism yoki ID">
+          <select id="sortSelect" aria-label="Saralash">
+            <option value="last_seen">Oxirgi faollik</option>
+            <option value="first_seen">Birinchi kirish</option>
+            <option value="messages">Xabarlar</option>
+            <option value="downloads">Yuklashlar</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Foydalanuvchi</th>
+              <th>ID</th>
+              <th>Birinchi kirish</th>
+              <th>Oxirgi faollik</th>
+              <th class="num">Xabarlar</th>
+              <th class="num">Yuklashlar</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+        <div class="empty" id="usersEmpty" hidden>
+          <div class="empty-glyph" aria-hidden="true">◎</div>
+          <p id="usersEmptyText">Hali ma'lumot yo'q.</p>
+          <p class="muted">Botga xabar yuborilganda foydalanuvchi shu yerda paydo bo'ladi.</p>
+        </div>
+      </div>
+
+      <div class="pager">
+        <button type="button" id="prevBtn">← Oldingi</button>
+        <span id="pageInfo" class="mono">1 / 1</span>
+        <button type="button" id="nextBtn">Keyingi →</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span id="dbInfo">analytics.db</span>
+    <span class="sep">·</span>
+    <span>avto yangilash 15 s</span>
+    <span class="sep">·</span>
+    <span id="footStamp">—</span>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="/static/chart.umd.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
