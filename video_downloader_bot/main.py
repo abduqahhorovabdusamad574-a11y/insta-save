@@ -5,11 +5,13 @@ import logging
 import asyncio
 import time
 import hashlib
+import uuid
 from contextlib import suppress
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command
 from utils.helpers import is_valid_url, cleanup_file, cleanup_stale_files
+from utils.stt import transcribe_audio_async
 from downloader import (
     download_video_async,
     download_audio_async,
@@ -190,8 +192,9 @@ async def start_cmd(message: types.Message):
         "Instagram, TikTok yoki YouTube havolasini yuboring — "
         "men uni eng yuqori sifatda yuklab beraman.\n\n"
         "🎵 <b>Musiqa qidirish va yuklash:</b>\n"
-        "Istalgan qo'shiq yoki ijrochi nomini yozib yuboring (masalan: <i>Dilni og'ritma</i>) — "
-        "topilgan musiqalar ro'yxatidan tanlab yuklab olasiz!\n\n"
+        "• Shunchaki qo'shiq yoki ijrochi nomini yozib yuboring (masalan: <i>Dilni og'ritma</i>);\n"
+        "• Yoki 🎙 <b>ovozli xabar</b> yuboring (qo'shiq nomini aytsangiz, bot o'zi tushunib topadi!);\n"
+        "• Yoki <i>/music Dilni og'ritma</i> buyrug'idan foydalaning.\n\n"
         "📜 <b>Tavsif:</b> video ostidagi 📜 Tavsif tugmasi video muallifining "
         "izohini (description) ko'rsatadi.\n\n"
         "⏳ Yuklash davomida soat animatsiyasi ko'rinib turadi.",
@@ -199,15 +202,30 @@ async def start_cmd(message: types.Message):
     )
 
 
-async def handle_music_search(message: types.Message, query: str):
+async def handle_music_search(
+    message: types.Message,
+    query: str,
+    status_msg: types.Message | None = None,
+    header_prefix: str = "",
+):
     """
     Qo'shiq nomi bo'yicha YouTube'dan qidirib, top-5 ta natijani
     tugmalar ([1], [2], ...) bilan chiqaradi.
     """
-    status_msg = await message.answer(
-        f"🔍 <i>«{html.escape(query)}» qidirilmoqda...</i>",
-        parse_mode="HTML",
-    )
+    if status_msg is None:
+        status_msg = await message.answer(
+            f"🔍 <i>«{html.escape(query)}» qidirilmoqda...</i>",
+            parse_mode="HTML",
+        )
+    else:
+        try:
+            await status_msg.edit_text(
+                f"{header_prefix}🔍 <i>«{html.escape(query)}» qidirilmoqda...</i>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
     try:
         tracks = await search_music_tracks_async(query, limit=5)
     except Exception as e:
@@ -216,13 +234,16 @@ async def handle_music_search(message: types.Message, query: str):
 
     if not tracks:
         await status_msg.edit_text(
-            f"❌ <b>«{html.escape(query)}»</b> bo'yicha musiqa topilmadi.\n"
-            "Iltimos, qo'shiq yoki ijrochi nomini boshqacha yozib ko'ring.",
+            f"{header_prefix}❌ <b>«{html.escape(query)}»</b> bo'yicha musiqa topilmadi.\n"
+            "Iltimos, qo'shiq yoki ijrochi nomini boshqacha aytib/yozib ko'ring.",
             parse_mode="HTML",
         )
         return
 
-    text_lines = [f"🎵 <b>«{html.escape(query)}» bo'yicha topilgan musiqalar:</b>\n"]
+    text_lines = []
+    if header_prefix:
+        text_lines.append(header_prefix.strip())
+    text_lines.append(f"🎵 <b>«{html.escape(query)}» bo'yicha topilgan musiqalar:</b>\n")
     buttons_row = []
 
     for idx, track_info in enumerate(tracks, 1):
@@ -433,6 +454,62 @@ async def _handle_music(message: types.Message, query: str):
     finally:
         if file_path:
             cleanup_file(file_path)
+
+
+@dp.message(F.voice | F.audio)
+async def process_voice_or_audio(message: types.Message):
+    """
+    Foydalanuvchi yuborgan ovozli xabarni (voice) yoki audio faylni qabul qilib,
+    Speech-to-Text (STT) orqali matnga aylantiradi va musiqani qidiradi.
+    """
+    track(message.from_user, "message")
+    status_msg = await message.answer("🎙 <i>Ovozli xabar tinglanmoqda...</i>", parse_mode="HTML")
+
+    download_dir = os.getenv("DOWNLOAD_DIR", "downloads")
+    os.makedirs(download_dir, exist_ok=True)
+
+    file_id = None
+    ext = ".ogg"
+    if message.voice:
+        file_id = message.voice.file_id
+        ext = ".ogg"
+    elif message.audio:
+        file_id = message.audio.file_id
+        ext = ".mp3"
+
+    if not file_id:
+        await status_msg.edit_text("❌ Ovozli fayl topilmadi.")
+        return
+
+    voice_path = os.path.join(download_dir, f"voice_{uuid.uuid4().hex[:10]}{ext}")
+
+    try:
+        tg_file = await bot.get_file(file_id)
+        if not tg_file.file_path:
+            await status_msg.edit_text("❌ Telegram'dan ovozni yuklab bo'lmadi.")
+            return
+
+        await bot.download_file(tg_file.file_path, voice_path)
+
+        # STT — nutqni matnga aylantiramiz
+        recognized_text = await transcribe_audio_async(voice_path)
+
+        if not recognized_text:
+            await status_msg.edit_text(
+                "❌ <b>Ovozni aniqlab bo'lmadi.</b>\n"
+                "Iltimos, qo'shiq nomini aniqroq ayting yoki matn sifatida yozib yuboring.",
+                parse_mode="HTML",
+            )
+            return
+
+        header_prefix = f"🗣 <b>Eshitildi:</b> <i>«{html.escape(recognized_text)}»</i>\n\n"
+        await handle_music_search(message, recognized_text, status_msg=status_msg, header_prefix=header_prefix)
+
+    except Exception as e:
+        logging.error(f"Ovozli xabar xatoligi: {e}")
+        await status_msg.edit_text("❌ Ovozli xabarni tahlil qilishda xatolik yuz berdi.")
+    finally:
+        cleanup_file(voice_path)
 
 
 @dp.message(F.text)
