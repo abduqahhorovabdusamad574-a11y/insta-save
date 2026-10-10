@@ -309,7 +309,7 @@ except Exception:  # noqa: BLE001 — noto'g'ri qiymat uchun
     AUDIO_QUALITY = "192"
 
 # "To'liq qo'shiq" deb hisoblanadigan minimal/maksimal davomiylik (soniya)
-FULL_TRACK_MIN = 45
+FULL_TRACK_MIN = 60
 FULL_TRACK_MAX = 20 * 60
 
 
@@ -432,15 +432,14 @@ async def download_audio_async(text: str) -> str:
 def search_music_tracks_sync(query: str, limit: int = 5) -> list[dict]:
     """
     YouTube qidiruvi orqali bir nechta (limit ta) to'liq musiqalarni topadi.
-    Har bir element: {"id": str, "title": str, "duration": int, "duration_str": str, "uploader": str, "url": str}
+    Shorts, tizer va juda qisqa videolarni chetlab o'tib, to'liq treklarni tanlaydi.
     """
     probe = dict(_base_options())
     probe.update({
-        "noplaylist": True,
         "extract_flat": "in_playlist",
         "skip_download": True,
     })
-    search_limit = max(limit * 2, 10)
+    search_limit = max(limit * 3, 15)
     try:
         with yt_dlp.YoutubeDL(probe) as ydl:
             info = ydl.extract_info(f"ytsearch{search_limit}:{query}", download=False)
@@ -456,12 +455,17 @@ def search_music_tracks_sync(query: str, limit: int = 5) -> list[dict]:
         except (TypeError, ValueError):
             dur = 0.0
 
-        # Juda qisqa (Shorts < 30s) yoki juda uzun (podkast/jonli efir > 30 min) larni o'tkazib yuboramiz
-        if dur > 0 and (dur < 30 or dur > 30 * 60):
+        # Juda qisqa (Shorts / parcha < 60s) yoki juda uzun (podkast/efir > 30 min) larni o'tkazib yuboramiz
+        if dur > 0 and (dur < 60 or dur > 30 * 60):
             continue
 
         raw_title = (entry.get("title") or "").strip()
         if not raw_title:
+            continue
+
+        lower_title = raw_title.lower()
+        # Shorts va tizerlarni aniq chetlatish
+        if any(bad in lower_title for bad in ("#shorts", "#short", "teaser", "treyler", "promo", "anons")):
             continue
 
         vid_id = entry.get("id") or ""
@@ -482,6 +486,10 @@ def search_music_tracks_sync(query: str, limit: int = 5) -> list[dict]:
         })
         if len(results) >= limit:
             break
+
+    # Agar natija topilmasa va qidiruvda "audio" so'zi bo'lmasa, qayta urinib ko'ramiz
+    if not results and not query.lower().endswith("audio"):
+        return search_music_tracks_sync(f"{query} audio", limit=limit)
 
     return results
 

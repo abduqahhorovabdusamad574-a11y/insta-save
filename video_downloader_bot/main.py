@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command
 from utils.helpers import is_valid_url, cleanup_file, cleanup_stale_files
-from utils.stt import transcribe_audio_async
+from utils.stt import transcribe_audio_async, clean_music_query
 from downloader import (
     download_video_async,
     download_audio_async,
@@ -212,22 +212,35 @@ async def handle_music_search(
     Qo'shiq nomi bo'yicha YouTube'dan qidirib, top-5 ta natijani
     tugmalar ([1], [2], ...) bilan chiqaradi.
     """
+    cleaned_query = clean_music_query(query) or query
+    search_target = cleaned_query if len(cleaned_query) >= 3 else query
+
     if status_msg is None:
         status_msg = await message.answer(
-            f"🔍 <i>«{html.escape(query)}» qidirilmoqda...</i>",
+            f"🔍 <i>«{html.escape(search_target)}» qidirilmoqda...</i>",
             parse_mode="HTML",
         )
     else:
         try:
             await status_msg.edit_text(
-                f"{header_prefix}🔍 <i>«{html.escape(query)}» qidirilmoqda...</i>",
+                f"{header_prefix}🔍 <i>«{html.escape(search_target)}» qidirilmoqda...</i>",
                 parse_mode="HTML",
             )
         except Exception:
             pass
 
     try:
-        tracks = await search_music_tracks_async(query, limit=5)
+        tracks = await search_music_tracks_async(search_target, limit=5)
+        # Agar tozalangan so'rovdan kam natija chiqsa, asl so'rov bilan ham sinab ko'ramiz
+        if len(tracks) < 2 and search_target != query:
+            extra_tracks = await search_music_tracks_async(query, limit=5)
+            existing_ids = {t["id"] for t in tracks}
+            for t in extra_tracks:
+                if t["id"] not in existing_ids:
+                    tracks.append(t)
+                    existing_ids.add(t["id"])
+                    if len(tracks) >= 5:
+                        break
     except Exception as e:
         logging.error(f"Musiqa qidiruv xatosi: {e}")
         tracks = []
@@ -243,7 +256,7 @@ async def handle_music_search(
     text_lines = []
     if header_prefix:
         text_lines.append(header_prefix.strip())
-    text_lines.append(f"🎵 <b>«{html.escape(query)}» bo'yicha topilgan musiqalar:</b>\n")
+    text_lines.append(f"🎵 <b>«{html.escape(search_target)}» bo'yicha topilgan musiqalar:</b>\n")
     buttons_row = []
 
     for idx, track_info in enumerate(tracks, 1):
