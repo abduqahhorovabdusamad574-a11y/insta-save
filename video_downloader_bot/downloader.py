@@ -104,6 +104,11 @@ def _base_options() -> dict:
         "retries": 3,
         "fragment_retries": 3,
         "socket_timeout": 30,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "android", "mweb"]
+            }
+        },
     }
     ffmpeg = os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg")
     if ffmpeg:
@@ -422,6 +427,68 @@ def _download_audio_sync(text: str) -> str:
 async def download_audio_async(text: str) -> str:
     """Musiqani yuklab (mp3), fayl yo'lini qaytaradi — botni bloklamaydi."""
     return await asyncio.to_thread(_download_audio_sync, text)
+
+
+def search_music_tracks_sync(query: str, limit: int = 5) -> list[dict]:
+    """
+    YouTube qidiruvi orqali bir nechta (limit ta) to'liq musiqalarni topadi.
+    Har bir element: {"id": str, "title": str, "duration": int, "duration_str": str, "uploader": str, "url": str}
+    """
+    probe = dict(_base_options())
+    probe.update({
+        "noplaylist": True,
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+    })
+    search_limit = max(limit * 2, 10)
+    try:
+        with yt_dlp.YoutubeDL(probe) as ydl:
+            info = ydl.extract_info(f"ytsearch{search_limit}:{query}", download=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Qidiruv xatoligi ({query}): {e}")
+        return []
+
+    entries = [e for e in (info.get("entries") or []) if e]
+    results = []
+    for entry in entries:
+        try:
+            dur = float(entry.get("duration") or 0)
+        except (TypeError, ValueError):
+            dur = 0.0
+
+        # Juda qisqa (Shorts < 30s) yoki juda uzun (podkast/jonli efir > 30 min) larni o'tkazib yuboramiz
+        if dur > 0 and (dur < 30 or dur > 30 * 60):
+            continue
+
+        raw_title = (entry.get("title") or "").strip()
+        if not raw_title:
+            continue
+
+        vid_id = entry.get("id") or ""
+        url = entry.get("url") or entry.get("webpage_url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else "")
+        if not url:
+            continue
+
+        m, s = divmod(int(dur), 60)
+        dur_str = f"{m:02d}:{s:02d}" if dur > 0 else "--:--"
+
+        results.append({
+            "id": vid_id,
+            "title": raw_title,
+            "duration": int(dur),
+            "duration_str": dur_str,
+            "uploader": (entry.get("uploader") or entry.get("channel") or "").strip(),
+            "url": url,
+        })
+        if len(results) >= limit:
+            break
+
+    return results
+
+
+async def search_music_tracks_async(query: str, limit: int = 5) -> list[dict]:
+    """Musiqalarni qidirish (async)."""
+    return await asyncio.to_thread(search_music_tracks_sync, query, limit)
 
 
 # ---- Video tavsifi (description) ----------------------------------------

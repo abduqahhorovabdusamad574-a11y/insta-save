@@ -1,5 +1,6 @@
 import os
 import json
+import html
 import logging
 import asyncio
 import time
@@ -9,7 +10,12 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command
 from utils.helpers import is_valid_url, cleanup_file, cleanup_stale_files
-from downloader import download_video_async, download_audio_async, extract_description_async
+from downloader import (
+    download_video_async,
+    download_audio_async,
+    extract_description_async,
+    search_music_tracks_async,
+)
 from analytics import track
 
 load_dotenv()
@@ -179,37 +185,100 @@ def _chunk_text(text: str, limit: int = 4000) -> list[str]:
 async def start_cmd(message: types.Message):
     track(message.from_user, "start")
     await message.answer(
-        "👋 Xush kelibsiz!\n\n"
-        "Menga Instagram, TikTok yoki YouTube havolasini yuboring — "
+        "👋 <b>Xush kelibsiz!</b>\n\n"
+        "🎬 <b>Video yuklash:</b>\n"
+        "Instagram, TikTok yoki YouTube havolasini yuboring — "
         "men uni eng yuqori sifatda yuklab beraman.\n\n"
-        "🎵 Musiqa uchun: /music <havola yoki qo'shiq nomi>\n"
-        "   misol: /music Dilni og'ritma yoki /music https://youtu.be/...\n"
-        "   yoki video ostidagi 🎵 Musiqasini olish tugmasini bosing.\n\n"
-        "📜 Tavsif: video ostidagi 📜 Tavsif tugmasi video muallifining "
+        "🎵 <b>Musiqa qidirish va yuklash:</b>\n"
+        "Istalgan qo'shiq yoki ijrochi nomini yozib yuboring (masalan: <i>Dilni og'ritma</i>) — "
+        "topilgan musiqalar ro'yxatidan tanlab yuklab olasiz!\n\n"
+        "📜 <b>Tavsif:</b> video ostidagi 📜 Tavsif tugmasi video muallifining "
         "izohini (description) ko'rsatadi.\n\n"
-        "⏳ Yuklash davomida soat animatsiyasi ko'rinib turadi."
+        "⏳ Yuklash davomida soat animatsiyasi ko'rinib turadi.",
+        parse_mode="HTML",
     )
+
+
+async def handle_music_search(message: types.Message, query: str):
+    """
+    Qo'shiq nomi bo'yicha YouTube'dan qidirib, top-5 ta natijani
+    tugmalar ([1], [2], ...) bilan chiqaradi.
+    """
+    status_msg = await message.answer(
+        f"🔍 <i>«{html.escape(query)}» qidirilmoqda...</i>",
+        parse_mode="HTML",
+    )
+    try:
+        tracks = await search_music_tracks_async(query, limit=5)
+    except Exception as e:
+        logging.error(f"Musiqa qidiruv xatosi: {e}")
+        tracks = []
+
+    if not tracks:
+        await status_msg.edit_text(
+            f"❌ <b>«{html.escape(query)}»</b> bo'yicha musiqa topilmadi.\n"
+            "Iltimos, qo'shiq yoki ijrochi nomini boshqacha yozib ko'ring.",
+            parse_mode="HTML",
+        )
+        return
+
+    text_lines = [f"🎵 <b>«{html.escape(query)}» bo'yicha topilgan musiqalar:</b>\n"]
+    buttons_row = []
+
+    for idx, track_info in enumerate(tracks, 1):
+        clean_title = html.escape(track_info["title"])
+        dur = track_info["duration_str"]
+        text_lines.append(f"{idx}. 🎶 <b>{clean_title}</b> <i>({dur})</i>")
+        key = _cache_url(track_info["url"])
+        buttons_row.append(
+            types.InlineKeyboardButton(text=f"{idx}️⃣", callback_data=f"music:{key}")
+        )
+
+    text_lines.append("\n👇 <i>Yuklab olish uchun quyidagi raqamlardan birini tanlang:</i>")
+    full_text = "\n".join(text_lines)
+
+    keyboard = [
+        buttons_row,
+        [types.InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_search")],
+    ]
+    markup = types.InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    await status_msg.edit_text(full_text, parse_mode="HTML", reply_markup=markup)
+
+
+@dp.callback_query(F.data == "cancel_search")
+async def cancel_search_callback(callback: types.CallbackQuery):
+    """Qidiruv natijalarini yopish."""
+    with suppress(Exception):
+        await callback.message.delete()
+    await callback.answer("Bekor qilindi.")
 
 
 @dp.message(Command("music"))
 async def music_cmd(message: types.Message):
-    """Musiqa: URL bo'lsa audiosi, matn bo'lsa YouTube'dan qidirib yuklaydi."""
+    """Musiqa: URL bo'lsa audiosi, nom bo'lsa top-5 qidirib ko'rsatadi."""
     text = (message.text or "").strip()
     arg = text[len("/music"):].strip() if text.lower().startswith("/music") else ""
     arg = arg.split("\n", 1)[0].strip()
 
     if not arg:
         await message.answer(
-            "🎵 Musiqani qanday yuklash mumkin?\n\n"
-            "/music <havola> — YouTube/Instagram/TikTok videosidan audio;\n"
-            "/music <qo'shiq nomi> — internetdan (YouTube) qidirib, "
-            "TO'LIQ trekni yuklaydi (Shorts/preview emas).\n\n"
-            "Misol: /music Dilni og'ritma\n"
-            "Yoki: yuborilgan video ostidagi tugmani bosing."
+            "🎵 <b>Musiqani qanday yuklash mumkin?</b>\n\n"
+            "1️⃣ <b>Qo'shiq nomi</b> — shunchaki nomini yozib yuboring:\n"
+            "   <i>Misol: Dilni og'ritma</i> yoki <i>Xamdam Sobirov</i>\n\n"
+            "2️⃣ <b>Buyruq orqali:</b>\n"
+            "   <i>/music Dilni og'ritma</i>\n\n"
+            "3️⃣ <b>Havola orqali:</b>\n"
+            "   <i>/music https://youtu.be/...</i>\n\n"
+            "4️⃣ Video yuborganingizda, video ostidagi <b>🎵 Musiqasini olish</b> tugmasini bosing.",
+            parse_mode="HTML",
         )
         return
 
-    await _handle_music(message, arg)
+    if is_valid_url(arg):
+        await _handle_music(message, arg)
+    else:
+        await handle_music_search(message, arg)
 
 
 @dp.callback_query(F.data.startswith("music:"))
@@ -303,7 +372,8 @@ async def _handle_music(message: types.Message, query: str):
     Musiqani yuklab (yoki qidirib topib) yuboradi — animatsiya bilan.
     `query` — URL yoki qo'shiq nomi.
     """
-    status_msg = await message.answer("⏳ Musiqa qidirilmoqda...")
+    initial_text = "⏳ Musiqa yuklanmoqda, kuting..." if is_valid_url(query) else "⏳ Musiqa qidirilmoqda..."
+    status_msg = await message.answer(initial_text)
     anim = await _start_animation(status_msg, "Musiqa yuklanmoqda...")
     file_path = None
     final_text = None
@@ -336,13 +406,21 @@ async def _handle_music(message: types.Message, query: str):
         if audio_ready:
             await status_msg.edit_text("📤 Audio Telegram'ga yuborilmoqda...")
 
-            title = os.path.splitext(os.path.basename(file_path))[0]
-            if title.endswith("]") and " [" in title:
-                title = title.rsplit(" [", 1)[0]
+            filename = os.path.splitext(os.path.basename(file_path))[0]
+            if filename.endswith("]") and " [" in filename:
+                filename = filename.rsplit(" [", 1)[0]
+
+            performer = None
+            title = filename
+            if " - " in filename:
+                parts = filename.split(" - ", 1)
+                performer = parts[0].strip()
+                title = parts[1].strip()
 
             await message.answer_audio(
                 audio=types.FSInputFile(file_path),
                 title=title,
+                performer=performer,
                 caption="✅ Musiqangiz tayyor! 🎵",
             )
             track(message.from_user, "music", 1)
@@ -356,13 +434,31 @@ async def _handle_music(message: types.Message, query: str):
         if file_path:
             cleanup_file(file_path)
 
-@dp.message(F.text)
-async def process_video_url(message: types.Message):
-    url = message.text.strip()
 
-    if not is_valid_url(url):
+@dp.message(F.text)
+async def process_text_message(message: types.Message):
+    """
+    Foydalanuvchi yuborgan matnni tahlil qiladi:
+      1) Agar havola bo'lsa (Instagram, TikTok, YouTube) — videoni yuklaydi;
+      2) Aks holda (qo'shiq yoki ijrochi nomi) — YouTube'dan top-5 natijalarni
+         qidirib, tanlash tugmalari bilan chiqaradi.
+    """
+    text = (message.text or "").strip()
+    if not text:
         return
 
+    # Komandalar (/start, /music) aiogram filtrlarida alohida ishlanadi
+    if text.startswith("/"):
+        return
+
+    if is_valid_url(text):
+        await _process_video_download(message, text)
+    else:
+        await handle_music_search(message, text)
+
+
+async def _process_video_download(message: types.Message, url: str):
+    """Video yuklab yuborish logikasi."""
     status_msg = await message.answer("⏳ Video yuklanmoqda, kuting...")
     anim = await _start_animation(status_msg, "Video yuklanmoqda...")
     file_path = None
@@ -380,7 +476,7 @@ async def process_video_url(message: types.Message):
             final_text = (
                 "🔒 Bu havola cookie'siz yuklanmayapti (Instagram ko'pchilik postlarni "
                 "kirishga ruxsat so'raydi).\n\n"
-                "📌 Yechim: brauzerдан Instagram cookie'larini export qilib "
+                "📌 Yechim: brauzerdan Instagram cookie'larini export qilib "
                 "utils/cookies.txt fayliga joylang va botni qayta ishga tushiring.\n"
                 "Yo'riqnoma: README.md → Instagram cookies bo'limi."
             )
@@ -390,8 +486,6 @@ async def process_video_url(message: types.Message):
         logging.error(f"Xatolik: {e}")
         final_text = "❌ Videoni yuklab bo'lmadi. Havolani qayta tekshiring."
     finally:
-        # Avval animatsiyani to'xtatamiz — aks holda u yakuniy xabarni
-        # keyin yana "yangilab" yuborishi mumkin
         await _stop_animation(anim)
 
     try:
@@ -410,7 +504,7 @@ async def process_video_url(message: types.Message):
         else:
             track(message.from_user, "video", 0)
             await status_msg.edit_text(final_text)
-    except Exception as e:  # noqa: BLE001 — xabar o'chgach edit rad etilishi va h.k.
+    except Exception as e:  # noqa: BLE001
         logging.warning(f"Status xabarini yangilab bo'lmadi: {e}")
     finally:
         if file_path:
