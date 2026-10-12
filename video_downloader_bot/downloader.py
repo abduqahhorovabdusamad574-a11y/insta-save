@@ -96,6 +96,8 @@ def _init_cookies() -> None:
         except Exception as e:
             logger.warning(f"Cookies muhit o'zgaruvchisini saqlashda xatolik: {e}")
 
+_init_cookies()
+
 
 def _cookies_available() -> bool:
     """cookies.txt ichida haqiqiy cookie (kamida 6 ta TAB bilan) borligini tekshiradi."""
