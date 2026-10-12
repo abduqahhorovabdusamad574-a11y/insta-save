@@ -142,6 +142,10 @@ def _base_options() -> dict:
             "Accept-Language": "en-US,en;q=0.9",
         },
     }
+    node_bin = shutil.which("node")
+    if node_bin:
+        options["js_runtimes"] = {"node": {}}
+        options["remote_components"] = ["ejs:github"]
     ffmpeg = os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg")
     if ffmpeg:
         options["ffmpeg_location"] = ffmpeg
