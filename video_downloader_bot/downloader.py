@@ -220,6 +220,9 @@ def _base_options() -> dict:
     browser = _browser_cookies()
     if browser:
         options["cookiesfrombrowser"] = browser
+    proxy = os.getenv("PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+    if proxy:
+        options["proxy"] = proxy
     return options
 
 
