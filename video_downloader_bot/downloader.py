@@ -77,42 +77,108 @@ def _candidate_formats() -> tuple:
     return ("best[ext=mp4]/best",)
 
 
+def _normalize_netscape_cookies(text: str) -> str:
+    """Netscape cookie matnini to'g'rilaydi: escape belgilarni ochadi, bo'shliqlarni tabga aylantiradi."""
+    if not text:
+        return ""
+    # 1. Escape qilingan belgilarni to'g'rilash (masalan Render env ichida \n yoki \t bo'lib qolgan bo'lsa)
+    text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
+
+    fixed_lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            fixed_lines.append(line)
+            continue
+        # Agar qatorda tab bo'lmasa, lekin bo'shliqlar bilan ajratilgan 7 ta Netscape ustuni bo'lsa:
+        # domain flag path secure expiry name value
+        if "\t" not in line:
+            parts = line.split(None, 6)
+            if len(parts) >= 7:
+                line = "\t".join(parts)
+        fixed_lines.append(line)
+    return "\n".join(fixed_lines) + "\n"
+
+
 def _init_cookies() -> None:
-    """Agar COOKIES_CONTENT, INSTAGRAM_COOKIES yoki COOKIES_BASE64 muhit o'zgaruvchisi berilgan bo'lsa, uni COOKIES_FILE ga saqlaydi."""
+    """
+    Cookie'larni barcha manbalardan qidiradi va COOKIES_FILE ga saqlaydi:
+    1. COOKIES_BASE64 muhit o'zgaruvchisi (eng xavfsiz va buzilmas usul);
+    2. COOKIES_CONTENT yoki INSTAGRAM_COOKIES muhit o'zgaruvchisi;
+    3. Render Secret Files: /etc/secrets/cookies.txt
+    """
     raw = os.getenv("COOKIES_CONTENT") or os.getenv("INSTAGRAM_COOKIES") or ""
     b64 = os.getenv("COOKIES_BASE64") or ""
+
+    # Agar COOKIES_CONTENT ichiga to'g'ridan-to'g'ri base64 string qo'yilgan bo'lsa
+    if not b64 and raw.strip().startswith("IyBOZX"):
+        b64 = raw.strip()
+        raw = ""
+
     if b64.strip():
         import base64
         try:
             raw = base64.b64decode(b64.strip()).decode("utf-8", errors="replace")
+            logger.info("Cookies COOKIES_BASE64 muhit o'zgaruvchisidan muvaffaqiyatli dekodlandi.")
         except Exception as e:
             logger.warning(f"COOKIES_BASE64 dekodlashda xatolik: {e}")
+
+    # Render Secret Files tekshiruvi: /etc/secrets/cookies.txt
+    render_secret = Path("/etc/secrets/cookies.txt")
+    if render_secret.exists() and not raw.strip():
+        try:
+            raw = render_secret.read_text(encoding="utf-8")
+            logger.info("Cookies Render Secret File (/etc/secrets/cookies.txt) dan topildi.")
+        except Exception as e:
+            logger.warning(f"Render secret file o'qishda xatolik: {e}")
+
     if raw.strip():
         try:
+            normalized = _normalize_netscape_cookies(raw)
             p = Path(COOKIES_FILE)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(raw.strip() + "\n", encoding="utf-8")
-            logger.info("Cookies muhit o'zgaruvchisidan muvaffaqiyatli saqlandi.")
+            p.write_text(normalized, encoding="utf-8")
+            logger.info("Cookies muvaffaqiyatli saqlandi (%d ta belgi).", len(normalized))
         except Exception as e:
-            logger.warning(f"Cookies muhit o'zgaruvchisini saqlashda xatolik: {e}")
+            logger.warning(f"Cookies faylini yozishda xatolik: {e}")
 
-_init_cookies()
+
+def get_cookie_status() -> dict:
+    """Cookie fayli holatini tekshiradi va diagnostika ma'lumotlarini qaytaradi."""
+    _init_cookies()
+    path = Path(COOKIES_FILE)
+    if not path.exists():
+        return {"available": False, "count": 0, "reason": "cookies.txt fayli yo'q"}
+    valid_count = 0
+    total_lines = 0
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+        for line in content.splitlines():
+            total_lines += 1
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.count("\t") >= 6:
+                valid_count += 1
+    except Exception as e:
+        return {"available": False, "count": 0, "reason": str(e)}
+
+    return {
+        "available": valid_count > 0,
+        "count": valid_count,
+        "total_lines": total_lines,
+        "reason": "OK" if valid_count > 0 else "Faylda haqiqiy 7-ustunli cookie qatorlari yo'q",
+    }
 
 
 def _cookies_available() -> bool:
-    """cookies.txt ichida haqiqiy cookie (kamida 6 ta TAB bilan) borligini tekshiradi."""
-    _init_cookies()
-    try:
-        with open(COOKIES_FILE, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.count("\t") >= 6:
-                    return True
-    except OSError:
-        return False
-    return False
+    """cookies.txt ichida haqiqiy cookie borligini tekshiradi."""
+    return get_cookie_status()["available"]
+
+
+_init_cookies()
 
 
 def _browser_cookies() -> tuple | None:

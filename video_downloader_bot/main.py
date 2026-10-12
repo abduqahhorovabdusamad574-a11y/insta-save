@@ -32,6 +32,7 @@ from downloader import (
     download_audio_async,
     extract_description_async,
     search_music_tracks_async,
+    get_cookie_status,
 )
 from analytics import track
 
@@ -653,6 +654,17 @@ async def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     logging.getLogger().addFilter(ConflictWarningFilter())
+
+    cookie_st = get_cookie_status()
+    if cookie_st["available"]:
+        logging.info("🍪 Cookies holati: FAOL (%d ta haqiqiy cookie mavjud)", cookie_st["count"])
+    else:
+        logging.warning(
+            "⚠️ Cookies holati: NOFAOL (%s). Env: COOKIES_CONTENT=%s, COOKIES_BASE64=%s",
+            cookie_st["reason"],
+            bool(os.getenv("COOKIES_CONTENT")),
+            bool(os.getenv("COOKIES_BASE64")),
+        )
 
     dashboard_runner = None
     # ---- 1. Veb-dashboard serverini ishga tushirish (Render portini ochish) ----

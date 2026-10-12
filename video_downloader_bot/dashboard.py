@@ -76,12 +76,14 @@ async def _auth_middleware(request: web.Request, handler):
 
 # ---- API handlerlar -------------------------------------------------------
 async def _me(request: web.Request) -> web.Response:
+    from downloader import get_cookie_status
     return web.json_response({
         "auth_required": bool(_password()),
         "bot": _bot_info,
         "server_time": int(time.time()),
         "uptime": int(time.time() - _started_at),
         "db": analytics.db_info(),
+        "cookies": get_cookie_status(),
     })
 
 
