@@ -435,11 +435,13 @@ async def _handle_music(message: types.Message, query: str):
         if code == "FILE_TOO_LARGE":
             final_text = "❌ Audio hajmi 50 MB dan katta — yuborib bo'lmadi."
         elif code == "LOGIN_REQUIRED":
-            final_text = (
-                "🔒 Bu havola cookie'siz yuklanmayapti. utils/cookies.txt ga "
-                "cookie'larni qo'ying va botni qayta ishga tushiring "
-                "(yo'riqnoma: README.md)."
-            )
+            if is_valid_url(query):
+                final_text = (
+                    "🔒 Ushbu havola mualliflik huquqi yoki cheklov tufayli cookie talab qilmoqda.\n"
+                    "utils/cookies.txt ga cookie qo'yib qayta urinib ko'rishingiz mumkin."
+                )
+            else:
+                final_text = "❌ Ushbu musiqani yuklab bo'lmadi. Ro'yxatdan boshqa raqamni tanlab ko'ring."
         elif code == "FFMPEG_MISSING":
             final_text = "❌ FFmpeg topilmadi — audio uchun FFmpeg o'rnatish shart."
         else:

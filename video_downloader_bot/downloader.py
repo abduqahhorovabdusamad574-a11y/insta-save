@@ -139,11 +139,6 @@ def _base_options() -> dict:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
         },
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios", "android", "mweb"]
-            }
-        },
     }
     ffmpeg = os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg")
     if ffmpeg:
@@ -436,15 +431,29 @@ def _download_audio_sync(text: str) -> str:
     try:
         options = dict(base)
         options["outtmpl"] = os.path.join(workdir, "%(title).70s [%(id)s].%(ext)s")
-        try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(query, download=True)
-                path = _resolve_path(ydl, info)
-        except Exception as e:  # noqa: BLE001 — xato turini aniqlab qayta uzamiz
-            if _is_auth_error(str(e)):
-                raise ValueError("LOGIN_REQUIRED") from e
-            raise
-        if not path:
+        path = None
+        auth_error = False
+        last_error = None
+
+        for fmt in ("bestaudio/best", "best[height<=720]/best", "best"):
+            options["format"] = fmt
+            try:
+                with yt_dlp.YoutubeDL(options) as ydl:
+                    info = ydl.extract_info(query, download=True)
+                    path = _resolve_path(ydl, info)
+                if path and os.path.exists(path):
+                    break
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                if _is_auth_error(str(e)):
+                    auth_error = True
+                continue
+
+        if not path or not os.path.exists(path):
+            if auth_error:
+                raise ValueError("LOGIN_REQUIRED") from last_error
+            if last_error:
+                raise last_error
             raise RuntimeError("yt-dlp yuklangan audiofaylni topa olmadi")
 
         size = os.path.getsize(path)
