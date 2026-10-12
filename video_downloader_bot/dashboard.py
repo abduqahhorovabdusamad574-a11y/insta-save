@@ -168,14 +168,14 @@ async def _export(request: web.Request) -> web.Response:
 
 
 async def _health(request: web.Request) -> web.Response:
-    """Render va boshqa monitoring vositalari uchun health check endpoint."""
+    """Render va UptimeRobot kabi monitoring vositalari uchun health check endpoint."""
     return web.Response(text="OK", status=200)
 
 
 async def _index(request: web.Request) -> web.Response:
     index = STATIC_DIR / "index.html"
     if not index.exists():
-        return web.Response(text="index.html topilmadi", status=404)
+        return web.Response(text="Bot Dashboard is running", status=200)
     return web.FileResponse(index)
 
 
@@ -183,7 +183,7 @@ async def _index(request: web.Request) -> web.Response:
 def build_app() -> web.Application:
     app = web.Application(middlewares=[_auth_middleware])
     app.router.add_get("/", _index)
-    app.router.add_get("/health", _health)
+    app.router.add_route("*", "/health", _health)
     app.router.add_get("/api/me", _me)
     app.router.add_post("/api/login", _login)
     app.router.add_get("/api/summary", _summary)

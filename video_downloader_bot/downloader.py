@@ -58,12 +58,28 @@ CANDIDATE_FORMATS = (
 )
 
 
-def _has_ffmpeg() -> bool:
-    """FFmpeg mavjudligini tekshiradi (env orqali yo'l ham qo'llab-quvvatlanadi)."""
+def get_ffmpeg_path() -> str | None:
+    """FFmpeg ijro fayli yo'lini qaytaradi (env, tizim PATH yoki imageio-ffmpeg)."""
     custom = os.getenv("FFMPEG_PATH")
-    if custom:
-        return os.path.exists(custom)
-    return shutil.which("ffmpeg") is not None
+    if custom and os.path.exists(custom):
+        return custom
+    which = shutil.which("ffmpeg")
+    if which:
+        return which
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            os.environ["FFMPEG_PATH"] = exe
+            return exe
+    except Exception:
+        pass
+    return None
+
+
+def _has_ffmpeg() -> bool:
+    """FFmpeg mavjudligini tekshiradi (env, PATH yoki imageio-ffmpeg)."""
+    return get_ffmpeg_path() is not None
 
 
 def _candidate_formats() -> tuple:
@@ -212,7 +228,7 @@ def _base_options() -> dict:
     if node_bin:
         options["js_runtimes"] = {"node": {}}
         options["remote_components"] = ["ejs:github"]
-    ffmpeg = os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg")
+    ffmpeg = get_ffmpeg_path()
     if ffmpeg:
         options["ffmpeg_location"] = ffmpeg
     if _cookies_available():

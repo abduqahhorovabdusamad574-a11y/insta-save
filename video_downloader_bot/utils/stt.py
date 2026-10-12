@@ -22,9 +22,27 @@ import speech_recognition as sr
 logger = logging.getLogger(__name__)
 
 
+def _get_ffmpeg_path() -> str | None:
+    custom = os.getenv("FFMPEG_PATH")
+    if custom and os.path.exists(custom):
+        return custom
+    which = shutil.which("ffmpeg")
+    if which:
+        return which
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            os.environ["FFMPEG_PATH"] = exe
+            return exe
+    except Exception:
+        pass
+    return None
+
+
 def convert_audio_to_wav(input_path: str, output_path: str) -> bool:
     """FFmpeg yordamida audio faylni 16kHz mono WAV formatiga o'tkazadi va dynaudnorm bilan ovozni normallashtiradi."""
-    ffmpeg = os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg")
+    ffmpeg = _get_ffmpeg_path()
     if not ffmpeg:
         logger.error("FFmpeg topilmadi!")
         return False

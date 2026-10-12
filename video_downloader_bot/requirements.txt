@@ -3,3 +3,5 @@ aiohttp>=3.9.0,<4.0.0
 python-dotenv>=1.0.0,<2.0.0
 yt-dlp>=2024.8.6
 SpeechRecognition>=3.10.0
+imageio-ffmpeg>=0.5.1
+

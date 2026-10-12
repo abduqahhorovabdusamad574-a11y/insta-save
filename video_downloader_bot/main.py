@@ -33,12 +33,23 @@ from downloader import (
     extract_description_async,
     search_music_tracks_async,
     get_cookie_status,
+    get_ffmpeg_path,
 )
 from analytics import track
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
+    sys.stderr.write(
+        "\n" + "=" * 65 + "\n"
+        "[DIQQAT/XATOLIK] BOT_TOKEN topilmadi!\n"
+        "Render Dashboard -> Service -> 'Environment' bo'limiga o'ting va\n"
+        "Key: BOT_TOKEN\n"
+        "Value: <botingiz tokeni>\n"
+        "deb qo'shing va 'Save Changes' tugmasini bosing!\n"
+        + "=" * 65 + "\n"
+    )
+    sys.stderr.flush()
     raise ValueError("BOT_TOKEN topilmadi! Render Environment sozlamalari yoki .env faylini tekshiring.")
 
 bot = Bot(token=BOT_TOKEN)
@@ -665,6 +676,12 @@ async def main():
             bool(os.getenv("COOKIES_CONTENT")),
             bool(os.getenv("COOKIES_BASE64")),
         )
+
+    ff_bin = get_ffmpeg_path()
+    if ff_bin:
+        logging.info("🎬 FFmpeg holati: FAOL (%s)", ff_bin)
+    else:
+        logging.warning("⚠️ FFmpeg topilmadi! Audio ajratish va birlashtiriladigan videolar cheklangan bo'ladi.")
 
     dashboard_runner = None
     # ---- 1. Veb-dashboard serverini ishga tushirish (Render portini ochish) ----
