@@ -77,8 +77,29 @@ def _candidate_formats() -> tuple:
     return ("best[ext=mp4]/best",)
 
 
+def _init_cookies() -> None:
+    """Agar COOKIES_CONTENT, INSTAGRAM_COOKIES yoki COOKIES_BASE64 muhit o'zgaruvchisi berilgan bo'lsa, uni COOKIES_FILE ga saqlaydi."""
+    raw = os.getenv("COOKIES_CONTENT") or os.getenv("INSTAGRAM_COOKIES") or ""
+    b64 = os.getenv("COOKIES_BASE64") or ""
+    if b64.strip():
+        import base64
+        try:
+            raw = base64.b64decode(b64.strip()).decode("utf-8", errors="replace")
+        except Exception as e:
+            logger.warning(f"COOKIES_BASE64 dekodlashda xatolik: {e}")
+    if raw.strip():
+        try:
+            p = Path(COOKIES_FILE)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(raw.strip() + "\n", encoding="utf-8")
+            logger.info("Cookies muhit o'zgaruvchisidan muvaffaqiyatli saqlandi.")
+        except Exception as e:
+            logger.warning(f"Cookies muhit o'zgaruvchisini saqlashda xatolik: {e}")
+
+
 def _cookies_available() -> bool:
     """cookies.txt ichida haqiqiy cookie (kamida 6 ta TAB bilan) borligini tekshiradi."""
+    _init_cookies()
     try:
         with open(COOKIES_FILE, encoding="utf-8") as fh:
             for line in fh:
@@ -114,6 +135,10 @@ def _base_options() -> dict:
         "retries": 3,
         "fragment_retries": 3,
         "socket_timeout": 30,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
         "extractor_args": {
             "youtube": {
                 "player_client": ["ios", "android", "mweb"]

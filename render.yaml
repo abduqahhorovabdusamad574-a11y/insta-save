@@ -14,3 +14,5 @@ services:
         sync: false
       - key: DASHBOARD_ENABLED
         value: "1"
+      - key: COOKIES_CONTENT
+        sync: false
