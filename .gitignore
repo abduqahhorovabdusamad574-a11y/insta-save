@@ -12,6 +12,8 @@ video_downloader_bot/.music_cache.json
 video_downloader_bot/analytics.db*
 utils/cookies.txt
 video_downloader_bot/utils/cookies.txt
+*cookies*.txt
+*cookies*
 
 # Yuklab olingan vaqtinchalik fayllar
 downloads/*
