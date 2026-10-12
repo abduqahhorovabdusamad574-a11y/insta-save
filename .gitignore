@@ -1,7 +1,39 @@
-# Maxfiy fayllar — HECH QACHON commit qilinmaydi
-plan.md/
+# Maxfiy ma'lumotlar va env fayllar
+.env
+*.env
+video_downloader_bot/.env
 
-# Vaqtinchalik / lokal
+# Ma'lumotlar bazasi va keshlar
+*.db
+*.db-shm
+*.db-wal
+.music_cache.json
+video_downloader_bot/.music_cache.json
+video_downloader_bot/analytics.db*
+utils/cookies.txt
+video_downloader_bot/utils/cookies.txt
+
+# Yuklab olingan vaqtinchalik fayllar
+downloads/*
+!downloads/.gitkeep
+video_downloader_bot/downloads/*
+!video_downloader_bot/downloads/.gitkeep
+
+# Log fayllar
+*.log
+bot.log
+
+# Python va virtual muhit
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Tizim va IDE fayllari
 .DS_Store
 Thumbs.db
-*.log
+.idea/
+.vscode/
+plan.md/

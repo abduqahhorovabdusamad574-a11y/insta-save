@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import html
 import logging
@@ -6,10 +7,24 @@ import asyncio
 import time
 import hashlib
 import uuid
+from pathlib import Path
 from contextlib import suppress
 from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+# .env yuklash (agar mavjud bo'lsa)
+env_path = BASE_DIR / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+else:
+    load_dotenv()
+
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command
+from aiogram.exceptions import TelegramConflictError
 from utils.helpers import is_valid_url, cleanup_file, cleanup_stale_files
 from utils.stt import transcribe_audio_async, clean_music_query
 from downloader import (
@@ -20,11 +35,10 @@ from downloader import (
 )
 from analytics import track
 
-load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN topilmadi! .env faylini tekshiring.")
+    raise ValueError("BOT_TOKEN topilmadi! Render Environment sozlamalari yoki .env faylini tekshiring.")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -110,7 +124,7 @@ async def _stop_animation(task: asyncio.Task | None):
 # to'liq URL keshda saqlanadi, tugmaga esa qisqa kalit (16 belgi) kiradi.
 # Kesh JSON faylga yoziladi — bot qayta ishga tushsa ham tugmalar ishlayveradi.
 URL_CACHE_TTL = 6 * 3600  # 6 soat
-URL_CACHE_FILE = os.getenv("URL_CACHE_FILE", ".music_cache.json")
+URL_CACHE_FILE = os.getenv("URL_CACHE_FILE", str(BASE_DIR / ".music_cache.json"))
 _url_cache: dict[str, tuple[str, float]] = {}
 
 
@@ -600,35 +614,103 @@ async def _process_video_download(message: types.Message, url: str):
         if file_path:
             cleanup_file(file_path)
 
+class ConflictWarningFilter(logging.Filter):
+    """
+    Agar boshqa bot nusxasi getUpdates so'rovini qilsa va TelegramConflictError
+    yuz bersa, konsolga aniq va tushunarli yo'riqnoma chiqaradi.
+    """
+    def __init__(self):
+        super().__init__()
+        self._last_warn = 0.0
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = str(record.getMessage())
+        if "TelegramConflictError" in msg or "Conflict: terminated by other getUpdates" in msg:
+            now = time.time()
+            if now - self._last_warn > 30:  # Har 30 soniyada ko'pi bilan 1 marta ogohlantirish
+                self._last_warn = now
+                logging.warning(
+                    "\n" + "=" * 65 + "\n"
+                    "⚠️ [DIQQAT] TelegramConflictError aniqlandi!\n"
+                    "Ushbu bot tokeni bilan boshqa joyda bot ishlab turibdi:\n"
+                    "1. Lokal kompyuteringizda yoki boshqa serverda bot yoniq qolgan bo'lsa,\n"
+                    "   uni darhol to'xtating (bitta tokenga 2 ta bot ulanolmaydi)!\n"
+                    "2. Agar Render'da yangi versiya deploy bo'layotgan bo'lsa, eski konteyner\n"
+                    "   bir necha soniyada o'chiriladi va bot avtomatik ulanadi.\n"
+                    + "=" * 65
+                )
+        return True
+
+
 async def main():
-    download_dir = os.getenv("DOWNLOAD_DIR", "downloads")
-    if not os.path.exists(download_dir):
-        os.makedirs(download_dir)
+    download_dir = os.getenv("DOWNLOAD_DIR", str(BASE_DIR / "downloads"))
+    os.makedirs(download_dir, exist_ok=True)
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    logging.getLogger().addFilter(ConflictWarningFilter())
 
-    # ---- Dashboard (foydalanuvchilar statistikasi) ------------------------
+    dashboard_runner = None
+    # ---- 1. Veb-dashboard serverini ishga tushirish (Render portini ochish) ----
     if os.getenv("DASHBOARD_ENABLED", "1").strip().lower() not in ("0", "false", "no"):
         try:
             from dashboard import start_dashboard, set_bot_info
-            await start_dashboard()
+            dashboard_runner = await start_dashboard()
+            logging.info("Veb-dashboard serveri muvaffaqiyatli ishga tushirildi.")
             try:
                 me = await bot.get_me()
                 set_bot_info(me.username, me.id)
+                logging.info("Bot ma'lumotlari: @%s (ID: %s)", me.username, me.id)
             except Exception as e:  # noqa: BLE001
                 logging.warning("Bot profilini olib bo'lmadi: %s", e)
-        except Exception as e:  # noqa: BLE001 — dashboard botning ishiga xalaqit bermasin
-            logging.error("Dashboard'ni ishga tushirib bo'lmadi: %s", e)
+        except Exception as e:
+            logging.error("Dashboard serverini ishga tushirishda xatolik: %s", e)
+            raise  # Render Web Service uchun port ochilishi shart
 
     if _url_cache:
-        logging.info(f"URL kesh yuklandi: {len(_url_cache)} ta 🎵 tugma (qayta ishga tushganda saqlanib kelgan)")
+        logging.info("URL kesh yuklandi: %d ta tugma (qayta ishga tushganda saqlanib kelgan)", len(_url_cache))
 
-    # Oldingi sessiyadan yotib qolgan (yarim yuklangan) fayllarni tozalaymiz
+    # Oldingi sessiyadan yotib qolgan fayllarni tozalaymiz
     removed = cleanup_stale_files(download_dir, max_age_seconds=3600)
     if removed:
-        logging.info(f"Startup tozalash: {removed} ta eski fayl o'chirildi.")
+        logging.info("Startup tozalash: %d ta eski fayl o'chirildi.", removed)
 
-    await dp.start_polling(bot)
+    # ---- 2. Webhook'ni tozalash (Conflict va eski xabarlar qoldiqlarini yo'qotish) ---
+    for attempt in range(1, 4):
+        try:
+            logging.info("Telegram webhook holati tekshirilmoqda/tozalanmoqda (urinish %d/3)...", attempt)
+            await bot.delete_webhook(drop_pending_updates=True)
+            logging.info("Telegram webhook muvaffaqiyatli tozalandi (drop_pending_updates=True).")
+            break
+        except Exception as e:
+            logging.warning("delete_webhook xatosi: %s", e)
+            if attempt < 3:
+                await asyncio.sleep(2)
+
+    # ---- 3. Pollingni boshlash (Dashboard bilan bir vaqtda asinxron ishlaydi) --------
+    logging.info("Telegram bot polling boshlanmoqda...")
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            close_bot_session=False,
+        )
+    finally:
+        logging.info("Ilova to'xtatilmoqda. Resurslar tozalanmoqda...")
+        if dashboard_runner:
+            try:
+                await dashboard_runner.cleanup()
+                logging.info("Dashboard serveri muvaffaqiyatli to'xtatildi.")
+            except Exception as e:
+                logging.warning("Dashboard tozalashda xatolik: %s", e)
+        try:
+            await bot.session.close()
+            logging.info("Bot sessiyasi yopildi.")
+        except Exception as e:
+            logging.warning("Bot sessiyasini yopishda xatolik: %s", e)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

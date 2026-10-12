@@ -21,8 +21,10 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
-DB_PATH = os.getenv("ANALYTICS_DB", "analytics.db")
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = os.getenv("ANALYTICS_DB", str(BASE_DIR / "analytics.db"))
 
 # `users` jadvalidagi hisoblagich ustunlari — xavfsizlik uchun faqat shu nomlar
 COUNTERS = {

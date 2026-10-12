@@ -24,15 +24,19 @@ import sys
 import time
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 from aiohttp import web
 
 import analytics
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR = BASE_DIR / "static"
 
-HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+HOST = os.getenv("DASHBOARD_HOST") or os.getenv("HOST") or "0.0.0.0"
 try:
-    PORT = int(os.getenv("DASHBOARD_PORT", "8000"))
+    PORT = int(os.getenv("PORT") or os.getenv("DASHBOARD_PORT") or "8000")
 except ValueError:
     PORT = 8000
 
@@ -59,9 +63,9 @@ def _expected_token() -> str:
 @web.middleware
 async def _auth_middleware(request: web.Request, handler):
     path = request.path
-    # /api/me ochiq (login ekrani uchun), /api/login parolni tekshiradi,
+    # /health, /api/me ochiq (login ekrani va health check uchun), /api/login parolni tekshiradi,
     # static va index fayllarga ham auth talab qilinmaydi.
-    public = path in ("/", "/api/login", "/api/me") or path.startswith("/static/")
+    public = path in ("/", "/health", "/api/login", "/api/me") or path.startswith("/static/")
     if not _password() or public:
         return await handler(request)
     token = request.headers.get("X-Auth-Token", "") or request.query.get("token", "")
@@ -161,6 +165,11 @@ async def _export(request: web.Request) -> web.Response:
     )
 
 
+async def _health(request: web.Request) -> web.Response:
+    """Render va boshqa monitoring vositalari uchun health check endpoint."""
+    return web.Response(text="OK", status=200)
+
+
 async def _index(request: web.Request) -> web.Response:
     index = STATIC_DIR / "index.html"
     if not index.exists():
@@ -172,6 +181,7 @@ async def _index(request: web.Request) -> web.Response:
 def build_app() -> web.Application:
     app = web.Application(middlewares=[_auth_middleware])
     app.router.add_get("/", _index)
+    app.router.add_get("/health", _health)
     app.router.add_get("/api/me", _me)
     app.router.add_post("/api/login", _login)
     app.router.add_get("/api/summary", _summary)
@@ -186,22 +196,35 @@ def build_app() -> web.Application:
 
 
 async def start_dashboard(host: str | None = None, port: int | None = None) -> web.AppRunner:
-    """Dashboard saytini ishga tushiradi (bot jarayoni ichida)."""
-    host = host or HOST
-    port = port or PORT
+    """Dashboard saytini ishga tushiradi (bot jarayoni ichida asinxron ishlaydi)."""
+    h = host or os.getenv("DASHBOARD_HOST") or os.getenv("HOST") or "0.0.0.0"
+    if port is None:
+        try:
+            p = int(os.getenv("PORT") or os.getenv("DASHBOARD_PORT") or "8000")
+        except ValueError:
+            p = 8000
+    else:
+        p = port
+
     runner = web.AppRunner(build_app(), access_log=None)
     await runner.setup()
-    site = web.TCPSite(runner, host, port)
+    site = web.TCPSite(runner, h, p)
     await site.start()
     auth_note = "parol bilan" if _password() else "ochiq (parol yo'q)"
-    logging.info("Dashboard: http://%s:%s  (%s)", host, port, auth_note)
+    logging.info("Dashboard serveri muvaffaqiyatli ishga tushdi: http://%s:%s (%s)", h, p, auth_note)
     return runner
 
 
 def run_standalone(host: str | None = None, port: int | None = None) -> None:
     """Faqat dashboard'ni alohida ishga tushiradi (botdan ajratib)."""
-    host = host or HOST
-    port = port or PORT
+    h = host or os.getenv("DASHBOARD_HOST") or os.getenv("HOST") or "0.0.0.0"
+    if port is None:
+        try:
+            p = int(os.getenv("PORT") or os.getenv("DASHBOARD_PORT") or "8000")
+        except ValueError:
+            p = 8000
+    else:
+        p = port
 
     # Windows konsoli (cp1251/cp1252) emoji'ni yubora olmaydi — UTF-8 ga o'tamiz
     for stream in (sys.stdout, sys.stderr):
@@ -211,8 +234,8 @@ def run_standalone(host: str | None = None, port: int | None = None) -> None:
             pass
 
     async def _main():
-        runner = await start_dashboard(host, port)
-        print(f"\n🚀 Dashboard: http://{host}:{port}")
+        runner = await start_dashboard(h, p)
+        print(f"\n🚀 Dashboard: http://{h}:{p}")
         if _password():
             print("   (parol talab qilinadi)")
         else:

@@ -17,19 +17,29 @@ import os
 import shutil
 import uuid
 
+from pathlib import Path
+import sys
 from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+_env_path = BASE_DIR / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path)
+else:
+    load_dotenv()
 
 import yt_dlp
 
 from utils.helpers import is_valid_url
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
 # ---- Sozlamalar ----------------------------------------------------------
-DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "downloads")
-COOKIES_FILE = os.path.join("utils", "cookies.txt")
+DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", str(BASE_DIR / "downloads"))
+COOKIES_FILE = os.getenv("COOKIES_FILE") or str(BASE_DIR / "utils" / "cookies.txt")
 
 try:
     MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "52428800"))  # 50 MB

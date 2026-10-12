@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: video-downloader-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python video_downloader_bot/main.py
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: DASHBOARD_ENABLED
+        value: "1"
